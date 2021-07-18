@@ -610,6 +610,7 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
     
     uint public wexPermille = 100;
     uint public treasuryPermille = 10;
+    uint public feePermille = 0;
     
     bool public isUsdtWithdrawInitiated = false;
     uint256 public usdtWithdrawTimestamp;
@@ -625,6 +626,7 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
     event SwapPathChanged(address[] swapPath);
     event WexPermilleChanged(uint256 wexPermille);
     event TreasuryPermilleChanged(uint256 treasuryPermille);
+    event FeePermilleChanged(uint256 feePermille);
     event TreasuryAddressChanged(address treasury);
     event UsdtWithdrawLockupPeriodChanged(uint256 usdtWithdrawLockupPeriod);
     
@@ -644,17 +646,24 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
     }
     
     function setWexPermille(uint _wexPermille) external onlyOwner {
-        require(_wexPermille < 500, 'wexPermille too high!');
+        require(_wexPermille <= 500, 'wexPermille too high!');
         wexPermille = _wexPermille;
         
         emit WexPermilleChanged(wexPermille);
     }
     
     function setTreasuryPermille(uint _treasuryPermille) external onlyOwner {
-        require(_treasuryPermille < 50, 'treasuryPermille too high!');
+        require(_treasuryPermille <= 50, 'treasuryPermille too high!');
         treasuryPermille = _treasuryPermille;
         
         emit TreasuryPermilleChanged(treasuryPermille);
+    }
+    
+    function setFeePermille(uint _feePermille) external onlyOwner {
+        require(_feePermille <= 20, 'feePermille too high!');
+        feePermille = _feePermille;
+        
+        emit FeePermilleChanged(feePermille);
     }
     
     function setTreasuryAddress(address _treasury) external onlyOwner {
@@ -672,6 +681,11 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
     
     function stake(uint256 amount) external nonReentrant {
         usdt.safeTransferFrom(msg.sender, address(this), amount);
+        if(feePermille > 0) {
+            uint256 feeAmount = amount * feePermille / 1000;
+            usdt.safeTransfer(treasury, feeAmount);
+            amount = amount - feeAmount;
+        }
         uint256 wexAmount = amount * wexPermille / 1000;
         usdt.approve(address(wswapRouter), wexAmount);
         wswapRouter.swapExactTokensForTokensSupportingFeeOnTransferTokens(
