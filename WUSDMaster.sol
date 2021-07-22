@@ -108,7 +108,10 @@ abstract contract Withdrawable is Context, Ownable {
      * but cannot withdraw anymore as soon as the 'withdrawer' gets changes (to the chef contract)
      */
     address private _withdrawer;
+    uint256 public withdrawershipTranferTimestamp;
+    bool public isWithdrawershipTransferInitiated;
 
+    event WithdrawershipTransferInitiated(uint256 timestamp);
     event WithdrawershipTransferred(address indexed previousWithdrawer, address indexed newWithdrawer);
 
     /**
@@ -134,6 +137,18 @@ abstract contract Withdrawable is Context, Ownable {
         require(_withdrawer == _msgSender(), "Withdrawable: caller is not the withdrawer");
         _;
     }
+    
+    /**
+     * @dev Initiates withdrawership transfer of the contract for after at least 24hours
+     * Can only be called by the current owner.
+     */
+    function initiateWithdrawershipTransfer(uint256 timestamp) external onlyOwner {
+        require(timestamp > block.timestamp + 24 hours, 'transfer timestamp not valid!');
+        withdrawershipTranferTimestamp = timestamp;
+        isWithdrawershipTransferInitiated = true;
+        
+        emit WithdrawershipTransferInitiated(timestamp);
+    }
 
     /**
      * @dev Transfers withdrawership of the contract to a new account (`newWithdrawer`).
@@ -141,8 +156,12 @@ abstract contract Withdrawable is Context, Ownable {
      */
     function transferWithdrawership(address newWithdrawer) public virtual onlyOwner {
         require(newWithdrawer != address(0), "Withdrawable: new withdrawer is the zero address");
+        require(isWithdrawershipTransferInitiated, "withdrawership transfer not initiated");
+        require(block.timestamp >= withdrawershipTranferTimestamp, "withdrawership transfer not yet available");
+        
         emit WithdrawershipTransferred(_withdrawer, newWithdrawer);
         _withdrawer = newWithdrawer;
+        isWithdrawershipTransferInitiated = false;
     }
 }
 
@@ -631,6 +650,14 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
     event UsdtWithdrawLockupPeriodChanged(uint256 usdtWithdrawLockupPeriod);
     
     constructor(IWUSD _wusd, IERC20 _usdt, IERC20 _wex, IWswapRouter _wswapRouter, address _treasury) {
+        require(
+            address(_wusd) != address(0) &&
+            address(_usdt) != address(0) &&
+            address(_wex) != address(0) &&
+            address(_wswapRouter) != address(0) &&
+            _treasury != address(0),
+            "zero address in constructor"
+        );
         wusd = _wusd;
         usdt = _usdt;
         wex = _wex;
@@ -713,7 +740,7 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
     }
     
     function initiateUsdtWithdraw(uint256 timestamp, uint256 amount) external onlyWithdrawer {
-        require(isUsdtWithdrawInitiated == false, 'withdraw already initiated!');
+        require(!isUsdtWithdrawInitiated, 'withdraw already initiated!');
         require(timestamp > block.timestamp + usdtWithdrawLockupPeriod, 'withdraw timestamp not valid!');
         usdtWithdrawTimestamp = timestamp;
         usdtWithdrawAmount = amount;
@@ -729,7 +756,7 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
     }
     
     function withdrawUsdt() external onlyWithdrawer {
-        require(isUsdtWithdrawInitiated == true, 'withdraw not initiated!');
+        require(isUsdtWithdrawInitiated, 'withdraw not initiated!');
         require(block.timestamp > usdtWithdrawTimestamp, 'withdraw not yet available!');
         
         usdt.safeTransfer(msg.sender, usdtWithdrawAmount);
