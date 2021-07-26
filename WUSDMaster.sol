@@ -614,6 +614,8 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
     uint public treasuryPermille = 10;
     uint public feePermille = 0;
     
+    uint256 maxStakeAmount;
+    
     event Stake(address indexed user, uint256 amount);
     event Redeem(address indexed user, uint256 amount);
     event UsdtWithdrawn(uint256 amount);
@@ -624,8 +626,9 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
     event FeePermilleChanged(uint256 feePermille);
     event TreasuryAddressChanged(address treasury);
     event StrategistAddressChanged(address strategist);
+    event MaxStakeAmountChanged(uint256 maxStakeAmount);
     
-    constructor(IWUSD _wusd, IERC20 _usdt, IERC20 _wex, IWswapRouter _wswapRouter, address _treasury) {
+    constructor(IWUSD _wusd, IERC20 _usdt, IERC20 _wex, IWswapRouter _wswapRouter, address _treasury, uint256 _maxStakeAmount) {
         require(
             address(_wusd) != address(0) &&
             address(_usdt) != address(0) &&
@@ -640,6 +643,7 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
         wswapRouter = _wswapRouter;
         treasury = _treasury;
         swapPath = [address(usdt), address(wex)];
+        maxStakeAmount = _maxStakeAmount;
     }
     
     function setSwapPath(address[] calldata _swapPath) external onlyOwner {
@@ -681,7 +685,14 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
         emit StrategistAddressChanged(strategist);
     }
     
+    function setMaxStakeAmount(uint256 _maxStakeAmount) external onlyOwner {
+        maxStakeAmount = _maxStakeAmount;
+        
+        emit MaxStakeAmountChanged(maxStakeAmount);
+    }
+    
     function stake(uint256 amount) external nonReentrant {
+        require(amount <= maxStakeAmount, 'amount too high');
         usdt.safeTransferFrom(msg.sender, address(this), amount);
         if(feePermille > 0) {
             uint256 feeAmount = amount * feePermille / 1000;
