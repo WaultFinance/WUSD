@@ -733,7 +733,7 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
     }
     
     function withdrawWex(uint256 amount) external onlyWithdrawer {
-        wex.safeTransfer(treasury, amount);
+        wex.safeTransfer(msg.sender, amount);
         
         emit WexWithdrawn(amount);
     }
