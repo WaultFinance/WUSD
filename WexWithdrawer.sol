@@ -492,6 +492,8 @@ contract WexWithdrawer is Ownable {
     event Withdraw(uint256 amount);
     event Deposit(uint256 amount);
     event InitiateMasterChange(uint256 timestamp, address master);
+    event CancelMasterChange();
+    event MasterChanged(address master);
     
     constructor(IERC20 _wex, IWUSDMaster _wusdMaster) {
         require(
@@ -533,6 +535,8 @@ contract WexWithdrawer is Ownable {
         isMasterChangeInitiated = false;
         masterChangeTimestamp = 0;
         newWusdMaster = IWUSDMaster(address(0));
+        
+        emit CancelMasterChange();
     }
     
     function changeMaster() external onlyOwner {
@@ -544,5 +548,7 @@ contract WexWithdrawer is Ownable {
         isMasterChangeInitiated = false;
         masterChangeTimestamp = 0;
         newWusdMaster = IWUSDMaster(address(0));
+        
+        emit MasterChanged(address(wusdMaster));
     }
 }
