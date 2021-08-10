@@ -609,15 +609,23 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
     address public strategist;
     
     address[] public swapPath;
+    address[] public swapPathReverse;
     
     uint public wexPermille = 100;
-    uint public treasuryPermille = 10;
-    uint public feePermille = 0;
+    uint public treasuryPermille = 5;
+    uint public feePermille = 2;
     
-    uint256 maxStakeAmount;
+    uint256 public maxStakeAmount;
+    
+    mapping(address => uint256) public wusdClaimAmount;
+    mapping(address => uint256) public wusdClaimBlock;
+    mapping(address => uint256) public usdtClaimAmount;
+    mapping(address => uint256) public usdtClaimBlock;
     
     event Stake(address indexed user, uint256 amount);
+    event WusdClaim(address indexed user, uint256 amount);
     event Redeem(address indexed user, uint256 amount);
+    event UsdtClaim(address indexed user, uint256 amount);
     event UsdtWithdrawn(uint256 amount);
     event WexWithdrawn(uint256 amount);
     event SwapPathChanged(address[] swapPath);
@@ -643,6 +651,7 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
         wswapRouter = _wswapRouter;
         treasury = _treasury;
         swapPath = [address(usdt), address(wex)];
+        swapPathReverse = [address(wex), address(usdt)];
         maxStakeAmount = _maxStakeAmount;
     }
     
@@ -692,7 +701,10 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
     }
     
     function stake(uint256 amount) external nonReentrant {
+        require(amount > 0, 'amount cant be zero');
+        require(wusdClaimAmount[msg.sender] == 0, 'you have to claim first');
         require(amount <= maxStakeAmount, 'amount too high');
+        
         usdt.safeTransferFrom(msg.sender, address(this), amount);
         if(feePermille > 0) {
             uint256 feeAmount = amount * feePermille / 1000;
@@ -708,21 +720,57 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
             address(this),
             block.timestamp
         );
-        wusd.mint(msg.sender, amount);
+        
+        wusdClaimAmount[msg.sender] = amount;
+        wusdClaimBlock[msg.sender] = block.number;
         
         emit Stake(msg.sender, amount);
     }
     
+    function claimWusd() external nonReentrant {
+        require(wusdClaimAmount[msg.sender] > 0, 'there is nothing to claim');
+        require(wusdClaimBlock[msg.sender] < block.number, 'you cant claim yet');
+        
+        uint256 amount = wusdClaimAmount[msg.sender];
+        wusdClaimAmount[msg.sender] = 0;
+        wusd.mint(msg.sender, amount);
+        
+        emit WusdClaim(msg.sender, amount);
+    }
+    
     function redeem(uint256 amount) external nonReentrant {
-        uint256 usdtTransferAmount = amount * (1000 - wexPermille - treasuryPermille) / 1000;
-        uint256 usdtTreasuryAmount = amount * treasuryPermille / 1000;
-        uint256 wexTransferAmount = wex.balanceOf(address(this)) * amount / wusd.totalSupply();
+        require(amount > 0, 'amount cant be zero');
+        require(usdtClaimAmount[msg.sender] == 0, 'you have to claim first');
+        
         wusd.burn(msg.sender, amount);
-        usdt.safeTransfer(treasury, usdtTreasuryAmount);
-        usdt.safeTransfer(msg.sender, usdtTransferAmount);
-        wex.safeTransfer(msg.sender, wexTransferAmount);
+        usdtClaimAmount[msg.sender] = amount;
+        usdtClaimBlock[msg.sender] = block.number;
         
         emit Redeem(msg.sender, amount);
+    }
+    
+    function claimUsdt() external nonReentrant {
+        require(usdtClaimAmount[msg.sender] > 0, 'there is nothing to claim');
+        require(usdtClaimBlock[msg.sender] < block.number, 'you cant claim yet');
+        
+        uint256 amount = usdtClaimAmount[msg.sender];
+        usdtClaimAmount[msg.sender] = 0;
+        
+        uint256 usdtTransferAmount = amount * (1000 - wexPermille - treasuryPermille) / 1000;
+        uint256 usdtTreasuryAmount = amount * treasuryPermille / 1000;
+        uint256 wexTransferAmount = wex.balanceOf(address(this)) * amount / (wusd.totalSupply() + amount);
+        usdt.safeTransfer(treasury, usdtTreasuryAmount);
+        usdt.safeTransfer(msg.sender, usdtTransferAmount);
+        wex.approve(address(wswapRouter), wexTransferAmount);
+        wswapRouter.swapExactTokensForTokensSupportingFeeOnTransferTokens(
+            wexTransferAmount,
+            0,
+            swapPathReverse,
+            msg.sender,
+            block.timestamp
+        );
+        
+        emit UsdtClaim(msg.sender, amount);
     }
     
     function withdrawUsdt(uint256 amount) external onlyOwner {
