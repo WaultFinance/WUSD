@@ -616,6 +616,9 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
     uint public feePermille = 2;
     
     uint256 public maxStakeAmount;
+    uint256 public maxRedeemAmount;
+    
+    address public dead = 0x000000000000000000000000000000000000dEaD;
     
     mapping(address => uint256) public wusdClaimAmount;
     mapping(address => uint256) public wusdClaimBlock;
@@ -635,8 +638,9 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
     event TreasuryAddressChanged(address treasury);
     event StrategistAddressChanged(address strategist);
     event MaxStakeAmountChanged(uint256 maxStakeAmount);
+    event MaxRedeemAmountChanged(uint256 maxRedeemAmount);
     
-    constructor(IWUSD _wusd, IERC20 _usdt, IERC20 _wex, IWswapRouter _wswapRouter, address _treasury, uint256 _maxStakeAmount) {
+    constructor(IWUSD _wusd, IERC20 _usdt, IERC20 _wex, IWswapRouter _wswapRouter, address _treasury, uint256 _maxStakeAmount, uint256 _maxRedeemAmount) {
         require(
             address(_wusd) != address(0) &&
             address(_usdt) != address(0) &&
@@ -653,6 +657,7 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
         swapPath = [address(usdt), address(wex)];
         swapPathReverse = [address(wex), address(usdt)];
         maxStakeAmount = _maxStakeAmount;
+        maxRedeemAmount = _maxRedeemAmount;
     }
     
     function setSwapPath(address[] calldata _swapPath) external onlyOwner {
@@ -700,6 +705,12 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
         emit MaxStakeAmountChanged(maxStakeAmount);
     }
     
+    function setMaxRedeemAmount(uint256 _maxRedeemAmount) external onlyOwner {
+        maxRedeemAmount = _maxRedeemAmount;
+        
+        emit MaxRedeemAmountChanged(maxRedeemAmount);
+    }
+    
     function stake(uint256 amount) external nonReentrant {
         require(amount > 0, 'amount cant be zero');
         require(wusdClaimAmount[msg.sender] == 0, 'you have to claim first');
@@ -711,6 +722,7 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
             usdt.safeTransfer(treasury, feeAmount);
             amount = amount - feeAmount;
         }
+        wusd.mint(address(this), amount);
         uint256 wexAmount = amount * wexPermille / 1000;
         usdt.approve(address(wswapRouter), wexAmount);
         wswapRouter.swapExactTokensForTokensSupportingFeeOnTransferTokens(
@@ -733,7 +745,7 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
         
         uint256 amount = wusdClaimAmount[msg.sender];
         wusdClaimAmount[msg.sender] = 0;
-        wusd.mint(msg.sender, amount);
+        wusd.transfer(msg.sender, amount);
         
         emit WusdClaim(msg.sender, amount);
     }
@@ -741,8 +753,9 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
     function redeem(uint256 amount) external nonReentrant {
         require(amount > 0, 'amount cant be zero');
         require(usdtClaimAmount[msg.sender] == 0, 'you have to claim first');
+        require(amount <= maxRedeemAmount, 'amount too high');
         
-        wusd.burn(msg.sender, amount);
+        wusd.transferFrom(msg.sender, dead, amount);
         usdtClaimAmount[msg.sender] = amount;
         usdtClaimBlock[msg.sender] = block.number;
         
@@ -758,7 +771,8 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
         
         uint256 usdtTransferAmount = amount * (1000 - wexPermille - treasuryPermille) / 1000;
         uint256 usdtTreasuryAmount = amount * treasuryPermille / 1000;
-        uint256 wexTransferAmount = wex.balanceOf(address(this)) * amount / (wusd.totalSupply() + amount);
+        uint256 wexTransferAmount = wex.balanceOf(address(this)) * amount / wusd.totalSupply();
+        wusd.burn(dead, amount);
         usdt.safeTransfer(treasury, usdtTreasuryAmount);
         usdt.safeTransfer(msg.sender, usdtTransferAmount);
         wex.approve(address(wswapRouter), wexTransferAmount);
