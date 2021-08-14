@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.0;
+pragma solidity 0.8.6;
 
 /*
  * @dev Provides information about the current execution context, including the
@@ -583,6 +583,91 @@ library SafeERC20 {
     }
 }
 
+/**
+ * @dev Contract module which allows children to implement an emergency stop
+ * mechanism that can be triggered by an authorized account.
+ *
+ * This module is used through inheritance. It will make available the
+ * modifiers `whenNotPaused` and `whenPaused`, which can be applied to
+ * the functions of your contract. Note that they will not be pausable by
+ * simply including this module, only once the modifiers are put in place.
+ */
+abstract contract Pausable is Context {
+    /**
+     * @dev Emitted when the pause is triggered by `account`.
+     */
+    event Paused(address account);
+
+    /**
+     * @dev Emitted when the pause is lifted by `account`.
+     */
+    event Unpaused(address account);
+
+    bool private _paused;
+
+    /**
+     * @dev Initializes the contract in unpaused state.
+     */
+    constructor() {
+        _paused = false;
+    }
+
+    /**
+     * @dev Returns true if the contract is paused, and false otherwise.
+     */
+    function paused() public view virtual returns (bool) {
+        return _paused;
+    }
+
+    /**
+     * @dev Modifier to make a function callable only when the contract is not paused.
+     *
+     * Requirements:
+     *
+     * - The contract must not be paused.
+     */
+    modifier whenNotPaused() {
+        require(!paused(), "Pausable: paused");
+        _;
+    }
+
+    /**
+     * @dev Modifier to make a function callable only when the contract is paused.
+     *
+     * Requirements:
+     *
+     * - The contract must be paused.
+     */
+    modifier whenPaused() {
+        require(paused(), "Pausable: not paused");
+        _;
+    }
+
+    /**
+     * @dev Triggers stopped state.
+     *
+     * Requirements:
+     *
+     * - The contract must not be paused.
+     */
+    function _pause() internal virtual whenNotPaused {
+        _paused = true;
+        emit Paused(_msgSender());
+    }
+
+    /**
+     * @dev Returns to normal state.
+     *
+     * Requirements:
+     *
+     * - The contract must be paused.
+     */
+    function _unpause() internal virtual whenPaused {
+        _paused = false;
+        emit Unpaused(_msgSender());
+    }
+}
+
 interface IWUSD is IERC20 {
     function mint(address account, uint256 amount) external;
     function burn(address account, uint256 amount) external;
@@ -598,7 +683,7 @@ interface IWswapRouter {
     ) external;
 }
 
-contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
+contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
     
     IWUSD public immutable wusd;
@@ -660,7 +745,16 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
         maxRedeemAmount = _maxRedeemAmount;
     }
     
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+    
     function setSwapPath(address[] calldata _swapPath) external onlyOwner {
+        require(_swapPath.length > 1 && _swapPath[0] == address(usdt) && _swapPath[_swapPath.length - 1] == address(wex), "invalid swap path");
         swapPath = _swapPath;
         
         emit SwapPathChanged(swapPath);
@@ -711,7 +805,7 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
         emit MaxRedeemAmountChanged(maxRedeemAmount);
     }
     
-    function stake(uint256 amount) external nonReentrant {
+    function stake(uint256 amount, uint256 amountOutMin) external nonReentrant whenNotPaused {
         require(amount > 0, 'amount cant be zero');
         require(wusdClaimAmount[msg.sender] == 0, 'you have to claim first');
         require(amount <= maxStakeAmount, 'amount too high');
@@ -727,7 +821,7 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
         usdt.approve(address(wswapRouter), wexAmount);
         wswapRouter.swapExactTokensForTokensSupportingFeeOnTransferTokens(
             wexAmount,
-            0,
+            amountOutMin,
             swapPath,
             address(this),
             block.timestamp
@@ -739,7 +833,7 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
         emit Stake(msg.sender, amount);
     }
     
-    function claimWusd() external nonReentrant {
+    function claimWusd() external nonReentrant whenNotPaused {
         require(wusdClaimAmount[msg.sender] > 0, 'there is nothing to claim');
         require(wusdClaimBlock[msg.sender] < block.number, 'you cant claim yet');
         
@@ -750,7 +844,7 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
         emit WusdClaim(msg.sender, amount);
     }
     
-    function redeem(uint256 amount) external nonReentrant {
+    function redeem(uint256 amount) external nonReentrant whenNotPaused {
         require(amount > 0, 'amount cant be zero');
         require(usdtClaimAmount[msg.sender] == 0, 'you have to claim first');
         require(amount <= maxRedeemAmount, 'amount too high');
@@ -762,7 +856,7 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
         emit Redeem(msg.sender, amount);
     }
     
-    function claimUsdt() external nonReentrant {
+    function claimUsdt(uint256 amountOutMin) external nonReentrant whenNotPaused {
         require(usdtClaimAmount[msg.sender] > 0, 'there is nothing to claim');
         require(usdtClaimBlock[msg.sender] < block.number, 'you cant claim yet');
         
@@ -778,11 +872,36 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard {
         wex.approve(address(wswapRouter), wexTransferAmount);
         wswapRouter.swapExactTokensForTokensSupportingFeeOnTransferTokens(
             wexTransferAmount,
-            0,
+            amountOutMin,
             swapPathReverse,
             msg.sender,
             block.timestamp
         );
+        
+        emit UsdtClaim(msg.sender, amount);
+    }
+    
+    function emergencyRedeemAll() external nonReentrant whenPaused {
+        uint256 amount = wusd.balanceOf(msg.sender);
+        require(amount > 0, 'amount cant be zero');
+        require(usdtClaimAmount[msg.sender] == 0, 'you have to claim first');
+        wusd.transferFrom(msg.sender, dead, amount);
+        usdtClaimAmount[msg.sender] = amount;
+        usdtClaimBlock[msg.sender] = block.number;
+        
+        emit Redeem(msg.sender, amount);
+    }
+    
+    function emergencyClaimUsdtAll() external nonReentrant whenPaused {
+        require(usdtClaimAmount[msg.sender] > 0, 'there is nothing to claim');
+        require(usdtClaimBlock[msg.sender] < block.number, 'you cant claim yet');
+        
+        uint256 amount = usdtClaimAmount[msg.sender];
+        usdtClaimAmount[msg.sender] = 0;
+        
+        uint256 usdtTransferAmount = amount * (1000 - wexPermille - treasuryPermille) / 1000;
+        wusd.burn(dead, amount);
+        usdt.safeTransfer(msg.sender, usdtTransferAmount);
         
         emit UsdtClaim(msg.sender, amount);
     }
