@@ -702,6 +702,9 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard, Pausable {
     
     uint256 public maxStakeAmount;
     uint256 public maxRedeemAmount;
+    uint256 public maxStakePerBlock;
+    uint256 internal lastBlock;
+    uint256 internal lastBlockUsdtStaked;
     
     address public dead = 0x000000000000000000000000000000000000dEaD;
     
@@ -725,7 +728,7 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard, Pausable {
     event MaxStakeAmountChanged(uint256 maxStakeAmount);
     event MaxRedeemAmountChanged(uint256 maxRedeemAmount);
     
-    constructor(IWUSD _wusd, IERC20 _usdt, IERC20 _wex, IWswapRouter _wswapRouter, address _treasury, uint256 _maxStakeAmount, uint256 _maxRedeemAmount) {
+    constructor(IWUSD _wusd, IERC20 _usdt, IERC20 _wex, IWswapRouter _wswapRouter, address _treasury, uint256 _maxStakeAmount, uint256 _maxRedeemAmount, uint256 _maxStakePerBlock) {
         require(
             address(_wusd) != address(0) &&
             address(_usdt) != address(0) &&
@@ -743,6 +746,7 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard, Pausable {
         swapPathReverse = [address(wex), address(usdt)];
         maxStakeAmount = _maxStakeAmount;
         maxRedeemAmount = _maxRedeemAmount;
+        maxStakePerBlock = _maxStakePerBlock;
     }
     
     function pause() external onlyOwner {
@@ -809,6 +813,12 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard, Pausable {
         require(amount > 0, 'amount cant be zero');
         require(wusdClaimAmount[msg.sender] == 0, 'you have to claim first');
         require(amount <= maxStakeAmount, 'amount too high');
+        if(lastBlock != block.number) {
+            lastBlockUsdtStaked = 0;
+            lastBlock = block.number;
+        }
+        lastBlockUsdtStaked += amount;
+        require(lastBlockUsdtStaked <= maxStakePerBlock, 'maximum stake per block exceeded');
         
         usdt.safeTransferFrom(msg.sender, address(this), amount);
         if(feePermille > 0) {
