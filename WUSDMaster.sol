@@ -727,6 +727,7 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard, Pausable {
     event StrategistAddressChanged(address strategist);
     event MaxStakeAmountChanged(uint256 maxStakeAmount);
     event MaxRedeemAmountChanged(uint256 maxRedeemAmount);
+    event MaxStakePerBlockChanged(uint256 maxStakePerBlock);
     
     constructor(IWUSD _wusd, IERC20 _usdt, IERC20 _wex, IWswapRouter _wswapRouter, address _treasury, uint256 _maxStakeAmount, uint256 _maxRedeemAmount, uint256 _maxStakePerBlock) {
         require(
@@ -807,6 +808,12 @@ contract WUSDMaster is Ownable, Withdrawable, ReentrancyGuard, Pausable {
         maxRedeemAmount = _maxRedeemAmount;
         
         emit MaxRedeemAmountChanged(maxRedeemAmount);
+    }
+    
+    function setMaxStakePerBlock(uint256 _maxStakePerBlock) external onlyOwner {
+        maxStakePerBlock = _maxStakePerBlock;
+        
+        emit MaxStakePerBlockChanged(maxStakePerBlock);
     }
     
     function stake(uint256 amount, uint256 amountOutMin) external nonReentrant whenNotPaused {
