@@ -476,6 +476,7 @@ interface IFairLaunch {
     function deposit(address _for, uint256 _pid, uint256 _amount) external;
     function withdraw(address _for, uint256 _pid, uint256 _amount) external;
     function withdrawAll(address _for, uint256 _pid) external;
+    function emergencyWithdraw(uint256 _pid) external;
 }
 
 interface IWUSDMaster {
@@ -526,7 +527,7 @@ contract WusdAlpacaStrategy is Ownable {
         return calculateUsdtAmount(ibUsdtTotalAmount) - usdtInvestedAmount;
     }
     
-    function investAll() external onlyOwner {
+    function investAll() external {
         invest(usdt.balanceOf(address(this)));
     }
     
@@ -545,7 +546,7 @@ contract WusdAlpacaStrategy is Ownable {
         emit UsdtInvested(usdtAmount);
     }
     
-    function withdraw(address to, uint256 ibUsdtAmount) internal onlyOwner returns (uint256) {
+    function withdraw(address to, uint256 ibUsdtAmount) internal returns (uint256) {
         uint256 usdtStartAmount = usdt.balanceOf(address(this));
         
         stakeContract.withdraw(address(this), stakePid, ibUsdtAmount);
@@ -599,7 +600,27 @@ contract WusdAlpacaStrategy is Ownable {
         }
         usdtInvestedAmount = 0;
     }
-
+    
+    function emergencyWithdraw() external onlyOwner {
+        uint256 usdtStartAmount = usdt.balanceOf(address(this));
+        stakeContract.emergencyWithdraw(stakePid);
+        ibUsdt.withdraw(ibUsdt.balanceOf(address(this)));
+        ibUsdtTotalAmount = 0;
+        uint256 usdtWithdrawn = usdt.balanceOf(address(this)) - usdtStartAmount;
+        if(usdtWithdrawn > usdtInvestedAmount) {
+            usdt.safeTransfer(treasury(), usdtWithdrawn - usdtInvestedAmount);
+            usdt.safeTransfer(address(wusdMaster), usdtInvestedAmount);
+        
+            emit UsdtWithdrawnToTreasury(usdtWithdrawn - usdtInvestedAmount);
+            emit UsdtWithdrawnToMaster(usdtInvestedAmount);
+        } else {
+            usdt.safeTransfer(address(wusdMaster), usdtWithdrawn);
+        
+            emit UsdtWithdrawnToMaster(usdtWithdrawn);
+        }
+        usdtInvestedAmount = 0;
+    }
+    
     function returnUsdtToMaster() external onlyOwner {
         uint256 amount = usdt.balanceOf(address(this));
         usdt.safeTransfer(address(wusdMaster), amount);
